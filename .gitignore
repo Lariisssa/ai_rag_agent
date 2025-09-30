@@ -1,6 +1,7 @@
 # General
 .env
 .env.local
+*.deepeval-cache
 *.pyc
 __pycache__/
 *.log
