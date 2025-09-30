@@ -1,0 +1,54 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8081:8080"
+    depends_on:
+      - db
+
+  backend:
+    build: ./backend
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app
+      # Use a named volume for media to avoid host FS issues
+      - media:/app/media
+      - ./samples:/app/samples
+    depends_on:
+      - db
+
+  frontend:
+    build: ./frontend
+    env_file: .env
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/usr/src/app
+      - frontend_node_modules:/usr/src/app/node_modules
+    command: sh -lc "corepack enable && pnpm install && pnpm dev --host 0.0.0.0"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  media:
+  frontend_node_modules:

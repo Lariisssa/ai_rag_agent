@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
+select = ["E","F","I","B","ANN","UP","N","S","TID","COM","EXE","ISC","A","C4","DTZ","PLC","PLE","PLW"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = []
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["backend"]

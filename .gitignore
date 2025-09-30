@@ -1,0 +1,37 @@
+# General
+.env
+.env.local
+*.pyc
+__pycache__/
+*.log
+.DS_Store
+node_modules/
+.dist/
+.cache/
+.coverage
+pytest_cache/
+.mypy_cache/
+ruff_cache/
+
+# Python
+.venv/
+.eggs/
+build/
+dist/
+*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Media and uploads
+media/
+backend/media/
+/samples
+
+# Alembic
+backend/migrations/versions/__pycache__/
+
+# IDE
+.vscode/
+.idea/
