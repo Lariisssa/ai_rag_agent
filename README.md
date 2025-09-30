@@ -1,3 +1,5 @@
+## THIS IS A WORK IN PROGRESS PROJECT
+
 # RAG PDF/Web QA
 
 End-to-end Retrieval-Augmented Generation system for answering questions based on uploaded PDFs and (optionally) web results. It includes:
