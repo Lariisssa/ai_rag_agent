@@ -28,57 +28,66 @@ This project is a collaboration for studying modern development and Artificial I
 
 ```mermaid
 flowchart TB
-    %% === STYLE DEFINITIONS ===
-    classDef title fill:#1e1e2f,stroke:#fff,color:#fff,font-size:18px,font-weight:bold;
-    classDef box fill:#2c2c3a,stroke:#aaa,color:#fff,stroke-width:1px;
-    classDef db fill:#1c1c2c,stroke:#89c2d9,color:#89c2d9,stroke-width:1px;
-    classDef api fill:#2c2f40,stroke:#74c69d,color:#74c69d;
-    classDef llm fill:#303040,stroke:#ffb347,color:#ffb347;
-    classDef front fill:#222230,stroke:#91a7ff,color:#91a7ff;
-    classDef web fill:#242424,stroke:#e07a5f,color:#e07a5f;
-    classDef highlight fill:#121212,stroke:#f0f0f0,color:#fff;
+%% ---------- NODES ----------
+User([👤 User])
 
-    %% === STRUCTURE ===
-    User([👤 User]):::title
+subgraph Frontend["🧭 Frontend (React + Vite)"]
+    UI[UI Components]
+    Renderer[Message Renderer]
+    APIClient[API Client · SSE]
+    UI --> Renderer
+    UI --> APIClient
+end
 
-    subgraph F["🧭 Frontend (React + Vite)"]
-        F1[UI Components]:::front --> F2[Message Renderer]:::front
-        F1 --> F3[API Client (SSE Stream)]:::front
+subgraph Backend["⚙️ Backend (FastAPI)"]
+    APIRoutes[API Routes] --> Orchestrator[Orchestrator]
+    Orchestrator --> Route{Docs or Web?}
+
+    subgraph DocsPipe["📄 Document Pipeline"]
+        Ingestion[PDF Ingestion]
+        TextEx[Text Extractor]
+        ImgEx[Image Extractor]
+        Vector[Vector Search]
+        Rerank[Semantic Reranking]
+
+        Ingestion --> TextEx
+        Ingestion --> ImgEx
+        TextEx --> Vector
+        Vector --> Rerank
     end
 
-    subgraph B["⚙️ Backend (FastAPI)"]
-        A[API Routes]:::api --> O[Orchestrator]:::api
-        O --> D{Docs or Web?}:::api
-
-        subgraph DOCS["📄 Document Pipeline"]
-            P[PDF Ingestion]:::api --> T[Text Extractor]:::api
-            P --> I[Image Extractor]:::api
-            T --> V[Vector Search]:::api
-            V --> R[Semantic Reranking]:::api
-        end
-
-        subgraph WEB["🌐 Web Retrieval"]
-            W[Web Search API]:::web
-        end
-
-        R --> S[Answer Synthesis]:::llm
-        W --> S
-        S --> G[GPT-4o Vision (Multimodal)]:::llm
-        G --> X[Streamed Response]:::llm
+    subgraph WebPipe["🌐 Web Retrieval"]
+        WebSearch[Web Search API]
     end
 
-    subgraph ST["🗄️ Storage"]
-        DB[(PostgreSQL + pgvector)]:::db
-        MF[(Media Files)]:::db
-    end
+    Route -->|Docs| Vector
+    Route -->|Web| WebSearch
 
-    %% === CONNECTIONS ===
-    User -->|Upload PDF / Ask Question| F
-    F -->|HTTP + SSE| B
-    B -->|Store Pages + Embeddings| DB
-    B -->|Save Images| MF
-    B -->|Embed Text| E[OpenAI Embeddings API]:::llm
-    X -->|SSE Stream| F
+    Rerank --> Synth[Answer Synthesis]
+    WebSearch --> Synth
+    Synth --> GPT4o[GPT-4o Vision (Multimodal)]
+    GPT4o --> Stream[Streamed Response]
+end
+
+subgraph Storage["🗄️ Storage"]
+    DB[(PostgreSQL + pgvector)]
+    Media[(Media Files)]
+end
+
+Embeds[OpenAI Embeddings API]
+
+%% ---------- CONNECTIONS ----------
+User -->|Upload PDF / Ask Question| Frontend
+Frontend -->|HTTP + SSE| Backend
+
+Backend -->|Store pages & embeddings| DB
+Backend -->|Save images| Media
+Backend -->|Embed text| Embeds
+
+Stream -->|SSE| Frontend
+ImgEx -->|Save JPG| Media
+TextEx -->|Store pages| DB
+Vector -->|Similarity Search| DB
 ```
 
 ### Data Flow
