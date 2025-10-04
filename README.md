@@ -65,7 +65,7 @@ subgraph Backend["⚙️ Backend (FastAPI)"]
 
     Rerank --> Synth[Answer Synthesis]
     WebSearch --> Synth
-    Synth --> GPT4o[GPT-4o Vision (Multimodal)]
+    Synth --> GPT4o[GPT-4o Vision · Multimodal]
     GPT4o --> Stream[Streamed Response]
 end
 
