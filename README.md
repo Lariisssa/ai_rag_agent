@@ -28,59 +28,69 @@ This project is a collaboration for studying modern development and Artificial I
 
 ```mermaid
 flowchart TB
-    User[User] -->|Upload PDF| Frontend
-    User -->|Ask Question| Frontend
+    %% === STYLE DEFINITIONS ===
+    classDef title fill:#1e1e2f,stroke:#fff,color:#fff,font-size:18px,font-weight:bold;
+    classDef box fill:#2c2c3a,stroke:#aaa,color:#fff,stroke-width:1px;
+    classDef db fill:#1c1c2c,stroke:#89c2d9,color:#89c2d9,stroke-width:1px;
+    classDef api fill:#2c2f40,stroke:#74c69d,color:#74c69d;
+    classDef llm fill:#303040,stroke:#ffb347,color:#ffb347;
+    classDef front fill:#222230,stroke:#91a7ff,color:#91a7ff;
+    classDef web fill:#242424,stroke:#e07a5f,color:#e07a5f;
+    classDef highlight fill:#121212,stroke:#f0f0f0,color:#fff;
 
-    subgraph Frontend["Frontend (React + Vite)"]
-        UI[UI Components]
-        UI -->|Markdown + Citations| Renderer[Message Renderer]
-        UI -->|SSE Stream| APIClient[API Client]
+    %% === STRUCTURE ===
+    User([👤 User]):::title
+
+    subgraph F["🧭 Frontend (React + Vite)"]
+        F1[UI Components]:::front --> F2[Message Renderer]:::front
+        F1 --> F3[API Client (SSE Stream)]:::front
     end
 
-    Frontend -->|HTTP/SSE| Backend
+    subgraph B["⚙️ Backend (FastAPI)"]
+        A[API Routes]:::api --> O[Orchestrator]:::api
+        O --> D{Docs or Web?}:::api
 
-    subgraph Backend["Backend (FastAPI)"]
-        API[API Routes] --> Orchestrator
-        API --> Ingestion[PDF Ingestion]
+        subgraph DOCS["📄 Document Pipeline"]
+            P[PDF Ingestion]:::api --> T[Text Extractor]:::api
+            P --> I[Image Extractor]:::api
+            T --> V[Vector Search]:::api
+            V --> R[Semantic Reranking]:::api
+        end
 
-        Orchestrator -->|Route Decision| Router{Docs or Web?}
-        Router -->|Docs| ANN[Vector Search]
-        Router -->|Web| WebSearch[Web Search API]
+        subgraph WEB["🌐 Web Retrieval"]
+            W[Web Search API]:::web
+        end
 
-        Ingestion -->|Extract Text| TextExtractor[Text Extractor]
-        Ingestion -->|Extract Images| ImageExtractor[Image Extractor]
-
-        ANN --> Reranker[Semantic Reranking]
-        Reranker --> Synthesizer[Answer Synthesis]
-        WebSearch --> Synthesizer
-
-        Synthesizer -->|Multimodal| GPT4o[GPT-4o Vision]
-        GPT4o --> Response[Streamed Response]
+        R --> S[Answer Synthesis]:::llm
+        W --> S
+        S --> G[GPT-4o Vision (Multimodal)]:::llm
+        G --> X[Streamed Response]:::llm
     end
 
-    Backend -->|Store| DB
-    Backend -->|Embed| OpenAIAPI[OpenAI Embeddings API]
-
-    subgraph Storage
-        DB[(PostgreSQL + pgvector)]
-        Media[Media Files]
+    subgraph ST["🗄️ Storage"]
+        DB[(PostgreSQL + pgvector)]:::db
+        MF[(Media Files)]:::db
     end
 
-    ImageExtractor -->|Save JPG| Media
-    TextExtractor -->|Store Pages| DB
-    ANN -->|Similarity Search| DB
-
-    Response -->|SSE| Frontend
+    %% === CONNECTIONS ===
+    User -->|Upload PDF / Ask Question| F
+    F -->|HTTP + SSE| B
+    B -->|Store Pages + Embeddings| DB
+    B -->|Save Images| MF
+    B -->|Embed Text| E[OpenAI Embeddings API]:::llm
+    X -->|SSE Stream| F
 ```
 
 ### Data Flow
 
 1. **Document Upload**:
+
    - PDF → PyMuPDF → Text per page + Images (JPG)
    - Text → OpenAI Embeddings (3072-d) → pgvector
    - Images → `/media/` folder
 
 2. **Query Processing**:
+
    - User question → Route decision (Docs/Web/Hybrid)
    - Vector search (cosine similarity) → Top K pages
    - If visual query (logo, chart, etc.) → Include images
@@ -104,6 +114,7 @@ flowchart TB
 ### Setup
 
 1. **Clone and configure**:
+
 ```bash
 git clone <repo-url>
 cd ai_rag_agent
@@ -111,12 +122,14 @@ cp .env.example .env
 ```
 
 2. **Edit `.env`**:
+
 ```env
 OPENAI_API_KEY=sk-your-key-here
 DATABASE_URL=postgresql+asyncpg://user:password@db:5432/app
 ```
 
 3. **Start services**:
+
 ```bash
 docker compose up -d --build
 ```
@@ -187,28 +200,31 @@ MEDIA_ROOT=./media
 ### Documents
 
 **POST /api/documents**
+
 - Upload PDF files (multipart/form-data)
 - Extracts text, images, generates embeddings
 - Returns: `{ id, title, page_count }[]`
 
 **GET /api/documents**
+
 - List all uploaded documents
 - Returns: `{ id, title, page_count }[]`
 
 **DELETE /api/documents/{id}**
+
 - Delete a document and its pages
 - Returns: `{ success: true }`
 
 ### Chat
 
 **POST /api/chat**
+
 - Server-Sent Events (SSE) stream
 - Request body:
+
 ```json
 {
-  "messages": [
-    { "role": "user", "content": "What is the logo?" }
-  ],
+  "messages": [{ "role": "user", "content": "What is the logo?" }],
   "document_ids": ["uuid-here"],
   "force_web": false
 }
@@ -223,6 +239,7 @@ MEDIA_ROOT=./media
 ## Database Schema
 
 ### documents
+
 ```sql
 CREATE TABLE documents (
   id UUID PRIMARY KEY,
@@ -233,6 +250,7 @@ CREATE TABLE documents (
 ```
 
 ### document_pages
+
 ```sql
 CREATE TABLE document_pages (
   id UUID PRIMARY KEY,
@@ -245,6 +263,7 @@ CREATE TABLE document_pages (
 ```
 
 ### document_page_images
+
 ```sql
 CREATE TABLE document_page_images (
   id UUID PRIMARY KEY,
@@ -329,6 +348,7 @@ answer = await llm.chat("gpt-4o", messages)
 ### Sources Panel
 
 Shows grounded sources:
+
 - Document pages with similarity scores
 - Web search results with URLs
 - Images from relevant pages
@@ -423,6 +443,7 @@ deepeval test run backend/evaluation/test_evaluate_rag.py
 ## Tech Stack
 
 **Backend**:
+
 - FastAPI (async Python web framework)
 - PostgreSQL 15+ with pgvector
 - SQLAlchemy 2.0 (async ORM)
@@ -432,6 +453,7 @@ deepeval test run backend/evaluation/test_evaluate_rag.py
 - structlog (structured logging)
 
 **Frontend**:
+
 - React 18
 - TypeScript
 - Vite (build tool)
@@ -441,6 +463,7 @@ deepeval test run backend/evaluation/test_evaluate_rag.py
 - Lucide React (icons)
 
 **Infrastructure**:
+
 - Docker + Docker Compose
 - Alembic (database migrations)
 
@@ -449,6 +472,7 @@ deepeval test run backend/evaluation/test_evaluate_rag.py
 ## License
 
 This project is an educational MVP. Dependencies have their own licenses:
+
 - PyMuPDF: AGPL (commercial license available)
 - OpenAI API: Usage subject to OpenAI terms
 
