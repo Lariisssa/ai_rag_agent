@@ -28,42 +28,42 @@ This project is a collaboration for studying modern development and Artificial I
 
 ```mermaid
 flowchart TB
-    User[👤 User] -->|Upload PDF| Frontend
+    User[User] -->|Upload PDF| Frontend
     User -->|Ask Question| Frontend
 
-    subgraph "Frontend (React + Vite)"
-        Frontend[UI Components]
-        Frontend -->|Markdown + Citations| Renderer[Message Renderer]
-        Frontend -->|SSE Stream| API_Client[API Client]
+    subgraph Frontend["Frontend (React + Vite)"]
+        UI[UI Components]
+        UI -->|Markdown + Citations| Renderer[Message Renderer]
+        UI -->|SSE Stream| APIClient[API Client]
     end
 
     Frontend -->|HTTP/SSE| Backend
 
-    subgraph "Backend (FastAPI)"
-        Backend[API Routes] --> Orchestrator
-        Backend --> Ingestion[PDF Ingestion]
+    subgraph Backend["Backend (FastAPI)"]
+        API[API Routes] --> Orchestrator
+        API --> Ingestion[PDF Ingestion]
 
         Orchestrator -->|Route Decision| Router{Docs or Web?}
         Router -->|Docs| ANN[Vector Search]
         Router -->|Web| WebSearch[Web Search API]
 
-        Ingestion -->|Extract Text| TextExtractor
-        Ingestion -->|Extract Images| ImageExtractor
+        Ingestion -->|Extract Text| TextExtractor[Text Extractor]
+        Ingestion -->|Extract Images| ImageExtractor[Image Extractor]
 
         ANN --> Reranker[Semantic Reranking]
         Reranker --> Synthesizer[Answer Synthesis]
         WebSearch --> Synthesizer
 
-        Synthesizer -->|Multimodal if Images| GPT4o[GPT-4o Vision]
+        Synthesizer -->|Multimodal| GPT4o[GPT-4o Vision]
         GPT4o --> Response[Streamed Response]
     end
 
     Backend -->|Store| DB
-    Backend -->|Embed| OpenAI_API[OpenAI Embeddings API]
+    Backend -->|Embed| OpenAIAPI[OpenAI Embeddings API]
 
-    subgraph "Storage"
+    subgraph Storage
         DB[(PostgreSQL + pgvector)]
-        Media[/media/ Static Files]
+        Media[Media Files]
     end
 
     ImageExtractor -->|Save JPG| Media
