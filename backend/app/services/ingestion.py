@@ -25,11 +25,20 @@ async def save_image_jpg(pix: fitz.Pixmap) -> Tuple[str, dict]:
     # Convert to RGB if needed
     if pix.n > 3:  # has alpha
         pix = fitz.Pixmap(fitz.csRGB, pix)
-    img_bytes = pix.tobytes("jpg", quality=85)
+
+    # PyMuPDF API: tobytes() for format, then use PIL for quality control
+    from PIL import Image
+    import io
+
+    # Get raw bytes in PPM format (lossless)
+    img_bytes = pix.tobytes("ppm")
+    # Use PIL to save as JPEG with quality
+    img = Image.open(io.BytesIO(img_bytes))
+
     name = f"{uuid.uuid4().hex}.jpg"
     path = os.path.join(settings.media_root, name)
-    with open(path, "wb") as f:
-        f.write(img_bytes)
+    img.save(path, "JPEG", quality=85)
+
     # Return file url path mounted at /media
     return f"/media/{name}", {"width": pix.width, "height": pix.height}
 
@@ -83,10 +92,11 @@ async def ingest_pdf(db: AsyncSession, file: UploadFile) -> dict:
                 except Exception as e:
                     log.error("image_write_error", page_number=pno + 1, error=str(e))
                     continue
+                import json
                 await db.execute(text("""
                     INSERT INTO document_page_images (document_page_id, position, file_url, dimensions)
-                    VALUES (:page_id, :position, :file_url, :dimensions)
-                """), {"page_id": page_id, "position": None, "file_url": file_url, "dimensions": dims})
+                    VALUES (:page_id, :position, :file_url, CAST(:dimensions AS jsonb))
+                """), {"page_id": page_id, "position": None, "file_url": file_url, "dimensions": json.dumps(dims)})
         except Exception as e:
             log.error("image_extract_error", page_number=pno + 1, error=str(e))
 

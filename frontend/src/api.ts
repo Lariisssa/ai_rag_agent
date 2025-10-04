@@ -34,6 +34,17 @@ export async function uploadDocuments(files: File[]): Promise<UploadDoc[]> {
   return data.documents
 }
 
+export async function deleteDocument(docId: string): Promise<void> {
+  try {
+    const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Delete failed: ${res.status}`)
+    console.log('[deleteDocument] success:', docId)
+  } catch (err) {
+    console.error('[deleteDocument] error', err)
+    throw err
+  }
+}
+
 export function streamChat(body: {
   messages: ChatMessage[]
   document_ids?: string[]

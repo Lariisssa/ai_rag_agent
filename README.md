@@ -1,15 +1,16 @@
-## THIS IS A WORK IN PROGRESS PROJECT
+# RAG PDF/Web QA - Multimodal Document Intelligence
 
-# RAG PDF/Web QA
+Production-ready Retrieval-Augmented Generation system for answering questions based on uploaded PDFs (text + images) and web search. Built with modern AI and web technologies.
 
-End-to-end Retrieval-Augmented Generation system for answering questions based on uploaded PDFs and (optionally) web results. It includes:
+## Key Features
 
-- FastAPI backend with PostgreSQL + pgvector for vector search
-- React + TypeScript frontend (Vite) with SSE streaming
-- Robust ingestion (text + images) via PyMuPDF
-- Orchestrated retrieval with multi-round batching and LLM-guided decisions
-
-This README explains architecture, setup, configuration, and usage.
+- 📄 **PDF Ingestion**: Extract text and images from PDFs using PyMuPDF
+- 🖼️ **Multimodal Vision**: GPT-4o Vision analyzes images (logos, charts, diagrams)
+- 🔍 **Semantic Search**: PostgreSQL + pgvector for efficient vector similarity search
+- 🌐 **Web Search Integration**: Hybrid RAG with document + web sources
+- ⚡ **Streaming Responses**: Real-time SSE streaming for instant feedback
+- 🎨 **Modern UI**: React + TypeScript + TailwindCSS + Framer Motion
+- 🐳 **Docker Ready**: Full containerization with Docker Compose
 
 ---
 
@@ -23,115 +24,337 @@ This project is a collaboration for studying modern development and Artificial I
 
 ---
 
-## Contents
-
-- [Architecture](#architecture)
-- [Repository structure](#repository-structure)
-- [Prerequisites](#prerequisites)
-- [Environment variables](#environment-variables)
-- [Running (Docker Compose)](#running-docker-compose)
-- [Running (local dev)](#running-local-dev)
-- [Testing and Evaluation](#testing-and-evaluation)
-- [Database and migrations](#database-and-migrations)
-- [Backend API](#backend-api)
-- [Frontend UX](#frontend-ux)
-- [RAG pipeline details](#rag-pipeline-details)
-- [Logging](#logging)
-- [Troubleshooting](#troubleshooting)
-- [Notes and licensing](#notes-and-licensing)
-
----
-
 ## Architecture
 
 ```mermaid
-flowchart LR
-  UI[React Frontend] -- SSE --> API(FastAPI Backend)
-  subgraph Backend
-    API --> Orchestrator
-    Orchestrator -->|SQL/pgvector| DB[(Postgres + pgvector)]
-    Orchestrator --> LLM[(LLM API)]
-    Orchestrator --> Web[Web Search Provider]
-    Ingestion -- PDF->Pages/Images --> DB
-  end
+flowchart TB
+    User[👤 User] -->|Upload PDF| Frontend
+    User -->|Ask Question| Frontend
+
+    subgraph "Frontend (React + Vite)"
+        Frontend[UI Components]
+        Frontend -->|Markdown + Citations| Renderer[Message Renderer]
+        Frontend -->|SSE Stream| API_Client[API Client]
+    end
+
+    Frontend -->|HTTP/SSE| Backend
+
+    subgraph "Backend (FastAPI)"
+        Backend[API Routes] --> Orchestrator
+        Backend --> Ingestion[PDF Ingestion]
+
+        Orchestrator -->|Route Decision| Router{Docs or Web?}
+        Router -->|Docs| ANN[Vector Search]
+        Router -->|Web| WebSearch[Web Search API]
+
+        Ingestion -->|Extract Text| TextExtractor
+        Ingestion -->|Extract Images| ImageExtractor
+
+        ANN --> Reranker[Semantic Reranking]
+        Reranker --> Synthesizer[Answer Synthesis]
+        WebSearch --> Synthesizer
+
+        Synthesizer -->|Multimodal if Images| GPT4o[GPT-4o Vision]
+        GPT4o --> Response[Streamed Response]
+    end
+
+    Backend -->|Store| DB
+    Backend -->|Embed| OpenAI_API[OpenAI Embeddings API]
+
+    subgraph "Storage"
+        DB[(PostgreSQL + pgvector)]
+        Media[/media/ Static Files]
+    end
+
+    ImageExtractor -->|Save JPG| Media
+    TextExtractor -->|Store Pages| DB
+    ANN -->|Similarity Search| DB
+
+    Response -->|SSE| Frontend
 ```
 
-- Documents are uploaded as PDFs; text is extracted per page and stored in `documents` / `document_pages`. Images are extracted and saved under `/media`.
-- Embeddings (3072-d) are created for non-empty pages and stored in pgvector for ANN search.
-- Queries are routed to docs and/or web search. Retrieval happens with ANN; fallback to basic fetch when embeddings are missing.
-- The orchestrator tests batches of 3 pages (up to 15) and asks the LLM for a structured decision JSON to continue/accept/fallback to web.
-- Answers are streamed to the UI via Server-Sent Events (SSE), followed by a final JSON envelope with citations.
+### Data Flow
+
+1. **Document Upload**:
+   - PDF → PyMuPDF → Text per page + Images (JPG)
+   - Text → OpenAI Embeddings (3072-d) → pgvector
+   - Images → `/media/` folder
+
+2. **Query Processing**:
+   - User question → Route decision (Docs/Web/Hybrid)
+   - Vector search (cosine similarity) → Top K pages
+   - If visual query (logo, chart, etc.) → Include images
+   - GPT-4o processes text + images → Grounded answer
+   - Stream response with citations
+
+3. **Multimodal Support**:
+   - Detects visual queries: "logo", "gráfico", "imagem", etc.
+   - Encodes images as base64 → GPT-4o Vision
+   - Renders images in chat using ReactMarkdown
 
 ---
 
-## Repository structure
+## Quick Start
 
-- `backend/`
-  - `app/main.py`: FastAPI app and middleware
-  - `app/routes/`: API routes (e.g., `chat.py`, `documents.py`)
-  - `app/services/`: Core RAG pipeline logic.
-  - `tests/`: Unit tests for the backend.
-  - `evaluation/`: RAG quality evaluation scripts.
-- `frontend/`
-  - `src/`: React app (Vite + TypeScript)
-- `docker-compose.yml`: services (db, backend, frontend)
-- `.env.example`: sample configuration
+### Prerequisites
 
----
+- Docker and Docker Compose
+- OpenAI API key
 
-## Prerequisites
+### Setup
 
-- Docker and Docker Compose (recommended), or
-- Python 3.11+, Node 20+ (for local dev without Docker)
+1. **Clone and configure**:
+```bash
+git clone <repo-url>
+cd ai_rag_agent
+cp .env.example .env
+```
 
----
+2. **Edit `.env`**:
+```env
+OPENAI_API_KEY=sk-your-key-here
+DATABASE_URL=postgresql+asyncpg://user:password@db:5432/app
+```
 
-## Environment variables
+3. **Start services**:
+```bash
+docker compose up -d --build
+```
 
-Copy `.env.example` to `.env` and set values:
-
-- `DATABASE_URL` (e.g., `postgresql+asyncpg://user:pass@db:5432/app`)
-- `OPENAI_API_KEY` (or compatible provider key used by `app/services/llm.py`)
-- `WEB_SEARCH_PROVIDER` and `WEB_SEARCH_API_KEY` (optional; to enable web search)
-- `MEDIA_ROOT` (dev media dir, default mounted at `/media`)
-- `LOG_LEVEL` (e.g., `INFO`)
-
----
-
-## Running (Docker Compose)
-
-1. Create `.env` (see above).
-2. Start everything:
-   - `docker compose up -d --build`
-3. URLs:
-   - Backend: http://localhost:8080
+4. **Access**:
    - Frontend: http://localhost:5173
-4. Apply DB migrations (if not already applied):
-   - `make migrate` (or run Alembic inside the backend container)
+   - Backend API: http://localhost:8080
+   - API Docs: http://localhost:8080/docs
 
 ---
 
-## Running (local dev)
+## Repository Structure
 
-Backend:
+```
+ai_rag_agent/
+├── backend/
+│   ├── app/
+│   │   ├── main.py              # FastAPI app
+│   │   ├── config.py            # Settings
+│   │   ├── routes/              # API endpoints
+│   │   │   ├── chat.py          # SSE streaming chat
+│   │   │   └── documents.py     # PDF upload
+│   │   ├── services/            # Core business logic
+│   │   │   ├── ingestion.py     # PDF → DB + images
+│   │   │   ├── orchestrator.py  # RAG orchestration
+│   │   │   ├── ranking.py       # Vector search
+│   │   │   ├── llm.py           # OpenAI client
+│   │   │   └── web_search.py    # Web search
+│   │   ├── prompts.py           # LLM prompts
+│   │   └── middleware.py        # Request logging
+│   ├── migrations/              # Alembic DB migrations
+│   ├── tests/                   # pytest tests
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx              # Main app
+│   │   ├── api.ts               # API client
+│   │   └── components/          # React components
+│   ├── package.json
+│   └── vite.config.ts
+├── docker-compose.yml
+├── .env.example
+└── README.md
+```
+
+---
+
+## Environment Variables
+
+Create `.env` from `.env.example`:
+
+```env
+# Required
+OPENAI_API_KEY=sk-your-key-here
+DATABASE_URL=postgresql+asyncpg://user:password@db:5432/app
+
+# Optional
+WEB_SEARCH_PROVIDER=tavily  # or brave, serper
+WEB_SEARCH_API_KEY=your-search-api-key
+LOG_LEVEL=INFO
+MEDIA_ROOT=./media
+```
+
+---
+
+## API Endpoints
+
+### Documents
+
+**POST /api/documents**
+- Upload PDF files (multipart/form-data)
+- Extracts text, images, generates embeddings
+- Returns: `{ id, title, page_count }[]`
+
+**GET /api/documents**
+- List all uploaded documents
+- Returns: `{ id, title, page_count }[]`
+
+**DELETE /api/documents/{id}**
+- Delete a document and its pages
+- Returns: `{ success: true }`
+
+### Chat
+
+**POST /api/chat**
+- Server-Sent Events (SSE) stream
+- Request body:
+```json
+{
+  "messages": [
+    { "role": "user", "content": "What is the logo?" }
+  ],
+  "document_ids": ["uuid-here"],
+  "force_web": false
+}
+```
+
+- Response stream:
+  - Tokens: `data: <token>\n\n`
+  - Final envelope: `data: { ... }\n\nevent: end\n\n`
+
+---
+
+## Database Schema
+
+### documents
+```sql
+CREATE TABLE documents (
+  id UUID PRIMARY KEY,
+  title TEXT,
+  page_count INT,
+  created_at TIMESTAMPTZ
+);
+```
+
+### document_pages
+```sql
+CREATE TABLE document_pages (
+  id UUID PRIMARY KEY,
+  document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
+  page_number INT,
+  content TEXT,
+  embedding vector(3072),  -- OpenAI text-embedding-3-large
+  created_at TIMESTAMPTZ
+);
+```
+
+### document_page_images
+```sql
+CREATE TABLE document_page_images (
+  id UUID PRIMARY KEY,
+  document_page_id UUID REFERENCES document_pages(id) ON DELETE CASCADE,
+  position INT,
+  file_url TEXT,  -- /media/<uuid>.jpg
+  dimensions JSONB  -- {"width": 1024, "height": 768}
+);
+```
+
+---
+
+## RAG Pipeline Details
+
+### 1. Routing Decision
+
+```python
+# Auto mode: LLM decides based on query
+if "investimento" in query or "preço" in query:
+    use_docs = True
+elif "notícia" in query or "hoje" in query:
+    use_web = True
+```
+
+### 2. Vector Search
+
+```sql
+SELECT *, (embedding <=> query_embedding) AS distance
+FROM document_pages
+WHERE document_id = ANY($1)
+ORDER BY distance ASC
+LIMIT 15;
+```
+
+### 3. Semantic Reranking
+
+- Deduplicates pages
+- Sorts by `similarity DESC, page_number ASC`
+- Batches of 3 pages, up to 15 total
+
+### 4. Multimodal Synthesis
+
+```python
+# Detect visual queries
+visual_keywords = ['logo', 'gráfico', 'imagem', 'foto']
+if any(k in query.lower() for k in visual_keywords):
+    # Encode images as base64 → GPT-4o Vision
+    images_b64 = [encode_image(img) for img in page_images]
+
+# Build multimodal message
+messages = [{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": query},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}}
+        for img in images_b64
+    ]
+}]
+
+# GPT-4o Vision processes text + images
+answer = await llm.chat("gpt-4o", messages)
+```
+
+---
+
+## Frontend Features
+
+### Chat Interface
+
+- **Message Types**:
+  - User messages: Blue gradient bubble
+  - Assistant messages: White with markdown rendering
+  - Citations: Blue badges `[1]` `[2]`
+  - Images: Inline markdown images
+
+### Mode Selection
+
+- **Docs**: Search only uploaded PDFs
+- **Web**: Search only the web
+- **Auto**: LLM decides based on query
+
+### Sources Panel
+
+Shows grounded sources:
+- Document pages with similarity scores
+- Web search results with URLs
+- Images from relevant pages
+
+---
+
+## Running Locally (Development)
+
+### Backend
 
 ```bash
-# Create and activate virtual environment
+# Create virtual environment
 python -m venv .venv
-# Windows (PowerShell): .\.venv\Scripts\Activate.ps1
-# Linux/macOS: source .venv/bin/activate
+source .venv/bin/activate  # or .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
 pip install -r backend/requirements.txt
 
-# Apply DB migrations (from project root)
+# Run migrations
 alembic -c backend/alembic.ini upgrade head
 
-# Run server
+# Start server
 uvicorn app.main:app --reload --port 8080 --app-dir backend
 ```
 
-Frontend:
+### Frontend
 
 ```bash
 cd frontend
@@ -141,142 +364,96 @@ npm run dev  # http://localhost:5173
 
 ---
 
-## Testing and Evaluation
-
-This project includes unit tests for backend logic and a RAG quality evaluation suite using [DeepEval](https://github.com/confident-ai/deepeval).
+## Testing
 
 ### Unit Tests (pytest)
 
-Unit tests verify specific functions in isolation. After installing dependencies, you can run them from the project root:
-
 ```bash
-pytest backend/
+pytest backend/tests/
 ```
 
 ### RAG Evaluation (DeepEval)
 
-DeepEval is used to measure the quality of the RAG pipeline against a golden dataset, using metrics like `AnswerRelevancy` and `Faithfulness`.
-
-**Setup:**
-
-1.  **Ensure Dependencies are Installed:** Make sure you have run `pip install -r backend/requirements.txt` in your active virtual environment.
-
-2.  **Set OpenAI API Key:** DeepEval uses an LLM to score the results. You must set your API key as an environment variable.
-    ```powershell
-    # In PowerShell
-    $env:OPENAI_API_KEY="your-key-here"
-    ```
-
-3.  **Upload Test Document:** The evaluation is based on the `samples/plano_negocios.pdf` file. Start the application servers (backend and frontend) and use the web interface at `http://localhost:5173` to upload this PDF.
-
-4.  **Get Document ID:** After uploading, check the logs from your backend server. You will see a line confirming the document was inserted. Copy the `document_id` UUID from this log.
-    ```
-    INFO: doc_inserted document_id=d5e8b5e9-92b5-45f1-9459-80309451a328 page_count=6
-    ```
-
-5.  **Set Evaluation Document ID:** Set the copied ID as an environment variable so the evaluation script knows which document to test against.
-    ```powershell
-    # In PowerShell
-    $env:EVAL_DOCUMENT_ID="d5e8b5e9-92b5-45f1-9459-80309451a328"
-    ```
-
-**Running the Evaluation:**
-
-With the backend server running and the environment variables set, run the DeepEval command from the project root:
-
 ```bash
+# Set environment
+export OPENAI_API_KEY=sk-...
+export EVAL_DOCUMENT_ID=<uuid-from-upload>
+
+# Run evaluation
 deepeval test run backend/evaluation/test_evaluate_rag.py
 ```
-
-DeepEval will execute the test cases defined in the script and print a detailed report with scores for each metric.
-
----
-
-## Database and migrations
-
-- Engine: Postgres 15+ with `pgvector` extension.
-- Run Alembic migrations from `backend/`:
-
-```bash
-alembic upgrade head
-```
-
-Key tables:
-
-- `documents(id, title, page_count, ...)`
-- `document_pages(id, document_id, page_number, content, embedding vector(3072))`
-- `document_page_images(document_page_id, file_url, dimensions)`
-
----
-
-## Backend API
-
-- `GET /api/healthz`: health probe
-- `POST /api/documents`: upload PDFs (multipart); stores text per page and images; generates embeddings
-- `GET /api/documents`: list uploaded docs
-- `POST /api/chat`: SSE stream
-  - Body: `{ messages: [{role,content}...], document_ids?: string[], force_web?: boolean }`
-  - Stream:
-    - Tokens via `data: <token>\n\n`
-    - Final envelope JSON via `data: { ... }\n\n` then `event: end\n\n`
-
----
-
-## Frontend UX
-
-- Upload PDFs and view document list (title + page count)
-- Choose mode: Docs, Web, or Auto
-- Ask a question; answer streams token-by-token
-- Sources panel shows citations (doc pages and web links)
-
----
-
-## RAG pipeline details
-
-- `app/services/ingestion.py`:
-  - Extracts text per page, saves images to `/media`, writes rows to DB.
-  - Generates embeddings (pads/truncates to dim=3072) and persists to `document_pages.embedding`.
-
-- `app/services/ranking.py`:
-  - `ann_search_pages()` builds a pgvector query and returns page candidates with `title`, `content`, and a derived `similarity`.
-
-- `app/services/orchestrator.py`:
-  - `route_decision(query, doc_ids, force_web)` chooses docs/web.
-  - Retrieval: ANN when 3072-d embeddings available, otherwise basic fetch.
-  - Dedup + sort by `similarity` desc, `page_number` asc.
-  - Multi-round batching: batches of 3 pages, up to 15 pages.
-  - For each batch, asks the LLM to return a strict JSON control object via `synthesize_answer_structured()`.
-
----
-
-## Logging
-
-- Structured logs via `structlog` (JSON-ish). Notable events:
-  - `ingest_start`, `doc_inserted`, `page_inserted`, embedding logs
-  - `ann_search_params`, `ann_search_pages`
-  - `batch_try`, `batch_structured_decision`, `retrieval_sources`
-  - `synth_answer`, `synth_structured_answer_raw`, `synth_prompts`
-
-Set `LOG_LEVEL` (e.g., `INFO`, `DEBUG`).
 
 ---
 
 ## Troubleshooting
 
-- **Embeddings dimension mismatch**
-  - We accept any vector size at inference but pad/truncate to 3072 on persistence; ANN path requires 3072-d.
+### Images not appearing
 
-- **No answers from docs**
-  - Batching tries up to 15 pages. If none accepted, ensure documents have text extracted and embeddings generated.
+- Check `MEDIA_ROOT` is correctly mounted
+- Verify images are saved: `ls backend/media/`
+- Check browser console for 404 errors
 
-- **Media not found**
-  - In dev, media is served from `MEDIA_ROOT` mounted at `/media` by `StaticFiles` in `app/main.py`.
+### Poor search results
+
+- Ensure embeddings were generated (check `document_pages.embedding`)
+- Try increasing `RETRIEVAL_TOP_K` in config
+- Use more specific queries
+
+### "No API key" errors
+
+- Verify `.env` has `OPENAI_API_KEY`
+- Restart Docker containers after changing `.env`
 
 ---
 
-## Notes and licensing
+## Production Checklist
 
-- PyMuPDF (fitz) has AGPL/commercial licensing. Ensure compliance for your use case.
-- Web search is pluggable. Implement `app/services/web_search.py:get_provider()` and configure `WEB_SEARCH_PROVIDER` and `WEB_SEARCH_API_KEY`.
-- This codebase is an MVP foundation; audit, security hardening, and evaluations are recommended before production use.
+- [ ] Set strong `DATABASE_URL` password
+- [ ] Use production-grade PostgreSQL (not Docker for prod)
+- [ ] Configure CORS properly in `backend/app/main.py`
+- [ ] Set up HTTPS/TLS for frontend and backend
+- [ ] Enable rate limiting and authentication
+- [ ] Monitor costs (OpenAI API usage)
+- [ ] Set up logging aggregation (Datadog, Sentry, etc.)
+- [ ] Configure backup strategy for PostgreSQL
+- [ ] Review and audit PyMuPDF licensing (AGPL)
 
+---
+
+## Tech Stack
+
+**Backend**:
+- FastAPI (async Python web framework)
+- PostgreSQL 15+ with pgvector
+- SQLAlchemy 2.0 (async ORM)
+- PyMuPDF (PDF processing)
+- Pillow (image processing)
+- OpenAI Python SDK
+- structlog (structured logging)
+
+**Frontend**:
+- React 18
+- TypeScript
+- Vite (build tool)
+- TailwindCSS (styling)
+- Framer Motion (animations)
+- react-markdown (markdown rendering)
+- Lucide React (icons)
+
+**Infrastructure**:
+- Docker + Docker Compose
+- Alembic (database migrations)
+
+---
+
+## License
+
+This project is an educational MVP. Dependencies have their own licenses:
+- PyMuPDF: AGPL (commercial license available)
+- OpenAI API: Usage subject to OpenAI terms
+
+---
+
+## Contributing
+
+This is a study project. For suggestions or issues, please open a GitHub issue or contact the authors.

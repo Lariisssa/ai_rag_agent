@@ -6,9 +6,47 @@ from .llm import llm_client
 from .ranking import ann_search_pages
 from ..prompts import DECISION_PROMPT, GROUNDED_SYNTHESIS_PROMPT, REWRITE_QUERY_PROMPT
 from ..schemas import ChatMessage as Message
+from ..agents.reranker import semantic_reranker
 import structlog
+import re
 
 log = structlog.get_logger(__name__)
+
+def build_multimodal_content(text: str, images: List[Dict[str, Any]]) -> Any:
+    """
+    Build multimodal content for GPT-4o.
+    If images are present, returns a list with text + image_url parts.
+    Otherwise, returns simple text string.
+    """
+    if not images:
+        return text
+
+    # Build multimodal content array
+    content_parts = [{"type": "text", "text": text}]
+
+    # Add up to 5 images (GPT-4o limit per message)
+    import base64
+    from ..config import settings
+    import os
+
+    for img in images[:5]:
+        try:
+            # Read image file and convert to base64
+            file_path = os.path.join(settings.media_root, os.path.basename(img['file_url']))
+            with open(file_path, 'rb') as f:
+                image_data = base64.b64encode(f.read()).decode('utf-8')
+
+            # Use data URL format (works with OpenAI API)
+            data_url = f"data:image/jpeg;base64,{image_data}"
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": data_url, "detail": "auto"}
+            })
+        except Exception as e:
+            log.warning("failed_to_load_image", file_url=img.get('file_url'), error=str(e))
+            continue
+
+    return content_parts
 
 async def rewrite_query_with_history(messages: List[Message]) -> str:
     """
@@ -78,6 +116,21 @@ async def fetch_pages_basic(db: AsyncSession, doc_ids: Optional[List[str]], limi
     log.info("fetch_pages_basic_result", limit=limit, doc_ids=doc_ids or [], count=len(rows))
     out: List[Dict[str, Any]] = []
     for r in rows:
+        # Fetch images for this page
+        page_id = r["id"]
+        img_res = await db.execute(text(
+            "SELECT id, file_url, position, dimensions FROM document_page_images WHERE document_page_id = :pid ORDER BY created_at ASC"
+        ), {"pid": page_id})
+        images = [
+            {
+                "id": str(img["id"]),
+                "file_url": img["file_url"],
+                "position": img["position"],
+                "dimensions": img["dimensions"],
+            }
+            for img in img_res.mappings().all()
+        ]
+
         out.append({
             "id": str(r["id"]),
             "document_id": str(r["document_id"]),
@@ -85,6 +138,7 @@ async def fetch_pages_basic(db: AsyncSession, doc_ids: Optional[List[str]], limi
             "content": r["content"],
             "title": r["title"],
             "similarity": 0.0,
+            "images": images,
         })
     return out
 
@@ -171,16 +225,17 @@ async def synthesize_answer(query: str, used: List[Dict[str, Any]], web_items: O
     # Removed query-specific numeric candidate hints to keep prompts pure RAG.
 
     sys = (
-        "Você é um assistente que responde SOMENTE com base nos trechos fornecidos. "
+        "Você é um assistente que responde SOMENTE com base nos trechos e imagens fornecidos. "
         "Responda em português, de forma direta e concisa. "
-        "Quando a pergunta envolver valores (ex.: preço, investimento), extraia o valor e a moeda exatamente como constam. "
-        "Use citações em colchetes [n] correspondendo às fontes listadas junto das frases onde o dado aparece. "
-        "Se, e somente se, não houver nenhum valor numérico pertinente nos trechos, diga que não foi encontrado."
+        "IMPORTANTE: Se imagens foram fornecidas junto com os trechos, você DEVE analisá-las para responder a pergunta. "
+        "Extraia informações EXATAMENTE como aparecem (números, valores, nomes, logos, gráficos). "
+        "Use citações em colchetes [n] correspondendo às fontes listadas. "
+        "Se a informação não estiver nos trechos OU nas imagens, diga que não foi encontrado."
     )
     user = (
         f"Pergunta: {query}\n\n"
-        + f"Fontes (use [n] nas citações):\n{context}\n\n"
-        + "Escreva a resposta final de forma objetiva, seguida de citações [n] quando necessário."
+        + f"Fontes textuais (use [n] nas citações):\n{context}\n\n"
+        + "Escreva a resposta final de forma objetiva, incluindo informação das imagens se disponíveis."
     )
     log.info(
         "synth_prompts",
@@ -191,11 +246,32 @@ async def synthesize_answer(query: str, used: List[Dict[str, Any]], web_items: O
     )
 
     try:
+        # Check if query is asking for visual/image content
+        visual_keywords = ['logo', 'imagem', 'figura', 'gráfico', 'grafico', 'foto', 'desenho', 'ilustração', 'ilustracao', 'visual', 'aparência', 'aparencia']
+        is_visual_query = any(keyword in query.lower() for keyword in visual_keywords)
+
+        # Collect all images from used sources for multimodal synthesis (only if visual query)
+        all_images = []
+        if is_visual_query:
+            for c in used:
+                if c.get("images"):
+                    all_images.extend(c["images"])
+
+        # Build multimodal user content if images are available
+        user_content = build_multimodal_content(user, all_images)
+
         answer = await llm_client.chat('gpt-5', [
             {"role": "system", "content": sys},
-            {"role": "user", "content": user},
+            {"role": "user", "content": user_content},
         ], temperature=0.0)
-        log.info("synth_answer", answer=answer)
+
+        # Append images as markdown ONLY if it's a visual query and model likely referenced them
+        if all_images and is_visual_query:
+            answer += "\n\n**Imagens relevantes:**\n\n"
+            for img in all_images:
+                answer += f"![Imagem da fonte]({img['file_url']})\n\n"
+
+        log.info("synth_answer", answer=answer, images_sent=len(all_images), is_visual_query=is_visual_query)
     except Exception:
         # Fallback to a simple draft if LLM fails
         body = []
@@ -276,8 +352,13 @@ async def synthesize_answer_structured(query: str, used: List[Dict[str, Any]], w
         log.warning("synth_structured_parse_fail", error=str(e))
         return {"code": 2}
 
-async def orchestrate_chat(db: AsyncSession, query: str, doc_ids: Optional[List[str]], force_web: bool) -> Tuple[List[str], Dict[str, Any]]:
+async def orchestrate_chat(db: AsyncSession, messages: List[Message], doc_ids: Optional[List[str]], force_web: bool) -> Tuple[List[str], Dict[str, Any]]:
     # Returns token chunks and final envelope
+
+    # Rewrite query with conversation history for better context
+    query = await rewrite_query_with_history(messages)
+    log.info("orchestrate_chat_query", original_messages_count=len(messages), rewritten_query=query)
+
     routing = await route_decision(query, doc_ids, force_web)
     sources: List[Dict[str, Any]] = []
     web_items: List[Dict[str, Any]] = []
@@ -287,11 +368,11 @@ async def orchestrate_chat(db: AsyncSession, query: str, doc_ids: Optional[List[
         try:
             qvec = (await llm_client.embed([query]))[0]
             if isinstance(qvec, list) and len(qvec) == 3072:
-                candidates = await ann_search_pages(db, qvec, doc_ids=doc_ids, limit=20)
+                candidates = await ann_search_pages(db, qvec, doc_ids=doc_ids, limit=30)
             else:
-                candidates = await fetch_pages_basic(db, doc_ids, limit=20)
+                candidates = await fetch_pages_basic(db, doc_ids, limit=30)
         except Exception:
-            candidates = await fetch_pages_basic(db, doc_ids, limit=20)
+            candidates = await fetch_pages_basic(db, doc_ids, limit=30)
 
         # Deduplicate by (document_id, page_number) and keep top by similarity then lower page number
         seen = set()
@@ -304,7 +385,11 @@ async def orchestrate_chat(db: AsyncSession, query: str, doc_ids: Optional[List[
             deduped.append(c)
         deduped.sort(key=lambda x: (-(x.get("similarity", 0.0)), x.get("page_number", 0)))
 
-        # MODIFICATION: Pre-populate sources with the best candidates *before* the structured decision loop.
+        # Apply semantic re-ranking for better relevance
+        log.info("applying_semantic_reranking", candidate_count=len(deduped))
+        deduped = await semantic_reranker.rerank(query, deduped, top_k=15)
+
+        # Pre-populate sources with the best candidates *before* the structured decision loop.
         # This ensures that if the loop fails to get a code:1, we still have the top documents for final synthesis.
         max_pages = 15
         batch_size = 3
@@ -375,7 +460,8 @@ async def orchestrate_chat(db: AsyncSession, query: str, doc_ids: Optional[List[
                     "title": s["title"],
                     "page": s["page_number"],
                     "similarity": s.get("similarity", 0.0),
-                    "snippet": (s.get("content") or "")[:200]
+                    "snippet": (s.get("content") or "")[:200],
+                    "images": s.get("images", []),
                 } for s in sources
             ] if sources else web_items
         }

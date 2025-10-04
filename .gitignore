@@ -23,6 +23,7 @@ dist/
 
 # Frontend
 frontend/node_modules/
+frontend/.pnpm-store/
 frontend/dist/
 
 # Media and uploads
@@ -36,3 +37,17 @@ backend/migrations/versions/__pycache__/
 # IDE
 .vscode/
 .idea/
+.claude/
+
+# Test files
+test_*.py
+*.bat
+
+# Sample PDFs
+*.pdf
+
+# Package lock files (using pnpm)
+frontend/package-lock.json
+
+# SQL init files
+init-db.sql
