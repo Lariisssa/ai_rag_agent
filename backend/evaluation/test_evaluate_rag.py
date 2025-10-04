@@ -38,6 +38,22 @@ golden_dataset = [
         "input": "Quais são os custos fixos mensais totais?",
         "expected_output": "O total de custos fixos mensais é de R$ 3.800, sendo R$ 800 de aluguel e R$ 3.000 de salários para duas pessoas.",
     },
+    {
+        "input": "Quantos funcionários são necessários e qual o custo total de salários?",
+        "expected_output": "São necessários 2 funcionários (incluindo o proprietário) com um custo total de salários de R$ 3.000 por mês.",
+    },
+    {
+        "input": "Qual o valor do aluguel mensal?",
+        "expected_output": "O aluguel mensal é de R$ 800.",
+    },
+    {
+        "input": "Qual é o preço de venda médio de cada produto?",
+        "expected_output": "O preço médio de venda de cada produto é de R$ 15.",
+    },
+    {
+        "input": "Qual o custo variável por unidade?",
+        "expected_output": "O custo variável por unidade é de R$ 10,50.",
+    },
 ]
 
 async def get_rag_response(query: str, document_id: str) -> Dict[str, Any]:

@@ -81,3 +81,33 @@ async def list_pages(doc_id: str, limit: int = 20, offset: int = 0, db: AsyncSes
             "images": imgs,
         })
     return {"items": items, "limit": limit, "offset": offset}
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete document and all its pages, embeddings, and images"""
+    # Check if document exists
+    res = await db.execute(text("SELECT id FROM documents WHERE id = :id"), {"id": doc_id})
+    if not res.first():
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Delete in correct order (foreign keys):
+    # 1. Images
+    await db.execute(text(
+        """
+        DELETE FROM document_page_images
+        WHERE document_page_id IN (
+            SELECT id FROM document_pages WHERE document_id = :doc_id
+        )
+        """
+    ), {"doc_id": doc_id})
+
+    # 2. Pages (includes embeddings via CASCADE)
+    await db.execute(text("DELETE FROM document_pages WHERE document_id = :doc_id"), {"doc_id": doc_id})
+
+    # 3. Document itself
+    await db.execute(text("DELETE FROM documents WHERE id = :id"), {"id": doc_id})
+
+    await db.commit()
+    logger.info("document_deleted", doc_id=doc_id)
+
+    return {"ok": True, "deleted_id": doc_id}

@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
@@ -13,8 +13,10 @@ class Settings(BaseSettings):
     media_root: str = Field(default="/app/media", alias="MEDIA_ROOT")
     web_search_enabled: bool = Field(default=True, alias="WEB_SEARCH_ENABLED")
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"  # Ignora campos extras do .env (como POSTGRES_*, VITE_*)
+    )
 
 settings = Settings()

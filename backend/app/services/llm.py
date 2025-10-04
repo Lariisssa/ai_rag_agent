@@ -12,14 +12,21 @@ class LLMClient:
         self.api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY")
         self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
-    async def chat(self, model: Literal['gpt-5','gpt-5-mini'], messages: List[Dict[str, str]], **kwargs: Any) -> str:
+    async def chat(self, model: Literal['gpt-5','gpt-5-mini'], messages: List[Dict[str, Any]], **kwargs: Any) -> str:
         if not self.api_key:
             # Fallback: echo last user message
             user_msgs = [m for m in messages if m.get('role') == 'user']
-            return (user_msgs[-1]['content'] if user_msgs else '')[:200]
+            last_content = user_msgs[-1]['content'] if user_msgs else ''
+            # Handle multimodal content (list of parts)
+            if isinstance(last_content, list):
+                text_parts = [p.get('text', '') for p in last_content if p.get('type') == 'text']
+                last_content = ' '.join(text_parts)
+            return str(last_content)[:200]
         # Map placeholder model names to a valid OpenAI model
         real_model = model
-        if model in ("gpt-5", "gpt-5-mini"):
+        if model == "gpt-5":
+            real_model = "gpt-4o"
+        elif model == "gpt-5-mini":
             real_model = "gpt-4o-mini"
         payload = {"model": real_model, "messages": messages, "temperature": kwargs.get("temperature", 0.2)}
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -42,7 +49,7 @@ class LLMClient:
             data = r.json()
             return [item["embedding"] for item in data["data"]]
 
-    async def stream_chat(self, model: Literal['gpt-5','gpt-5-mini'], messages: List[Dict[str, str]]):
+    async def stream_chat(self, model: Literal['gpt-5','gpt-5-mini'], messages: List[Dict[str, Any]]):
         # For MVP, chunk the non-stream chat response into tokens
         text = await self.chat(model, messages)
         for tok in text.split():

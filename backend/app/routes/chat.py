@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import AsyncSessionLocal
 from ..schemas import ChatRequest
-from ..services.orchestrator import orchestrate_chat, rewrite_query_with_history
+from ..services.orchestrator import orchestrate_chat
 import json
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -14,9 +14,8 @@ async def chat(req: ChatRequest):
     async def event_stream():
         # Create a dedicated DB session for the duration of the stream
         async with AsyncSessionLocal() as db:
-            # Rewrite query with history before passing to orchestrator
-            rewritten_query = await rewrite_query_with_history(req.messages)
-            tokens, env = await orchestrate_chat(db, query=rewritten_query, doc_ids=req.document_ids, force_web=bool(req.force_web))
+            # Pass full message history to orchestrator for context-aware query rewriting
+            tokens, env = await orchestrate_chat(db, messages=req.messages, doc_ids=req.document_ids, force_web=bool(req.force_web))
             # Stream tokens one by one
             for t in tokens:
                 yield f"data: {t} \n\n"

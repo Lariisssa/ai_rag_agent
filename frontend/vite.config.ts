@@ -8,12 +8,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        // When running in Docker, the backend is reachable at http://backend:8080
-        target: process.env.VITE_API_BASE || 'http://backend:8080',
+        // Use VITE_API_BASE from .env, fallback to localhost for local dev
+        target: process.env.VITE_API_BASE || 'http://localhost:8080',
         changeOrigin: true,
       },
       '/media': {
-        target: process.env.VITE_API_BASE || 'http://backend:8080',
+        target: process.env.VITE_API_BASE || 'http://localhost:8080',
         changeOrigin: true,
       },
     },

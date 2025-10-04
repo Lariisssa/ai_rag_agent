@@ -40,6 +40,22 @@ async def ann_search_pages(
     for r in rows:
         # WARNING: logs entire content as requested by user
         log.info("ann_row", doc_id=str(r["document_id"]), page=int(r["page_number"]), title=r["title"], content=r["content"])
+
+        # Fetch images for this page
+        page_id = r["id"]
+        img_res = await db.execute(text(
+            "SELECT id, file_url, position, dimensions FROM document_page_images WHERE document_page_id = :pid ORDER BY created_at ASC"
+        ), {"pid": page_id})
+        images = [
+            {
+                "id": str(img["id"]),
+                "file_url": img["file_url"],
+                "position": img["position"],
+                "dimensions": img["dimensions"],
+            }
+            for img in img_res.mappings().all()
+        ]
+
         out.append({
             "id": str(r["id"]),
             "document_id": str(r["document_id"]),
@@ -47,5 +63,6 @@ async def ann_search_pages(
             "content": r["content"],
             "title": r["title"],
             "similarity": 1.0 - float(r["distance"]) if r["distance"] is not None else 0.0,
+            "images": images,
         })
     return out
